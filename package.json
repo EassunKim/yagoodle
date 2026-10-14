@@ -1,0 +1,21 @@
+{
+  "name": "yagoodle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A daily hololive talent guessing game",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
+    "validate": "node --disable-warning=ExperimentalWarning scripts/validate.js",
+    "schedule": "node --disable-warning=ExperimentalWarning scripts/schedule.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
