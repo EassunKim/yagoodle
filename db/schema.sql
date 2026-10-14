@@ -82,7 +82,7 @@ create index daily_puzzles_mode_date_idx on daily_puzzles (mode, date);
 -- talent_profiles (view)
 -- Talents joined with their generation and language, so the app reads flat
 -- rows with 'generation' and 'branch' as text instead of id numbers.
--- security_invoker makes the view obey the tables' row level security
+-- security_invoker makes the view obey the tables' row level securitydai
 -- instead of bypassing it.
 -- ----------------------------------------------------------------------------
 create view talent_profiles

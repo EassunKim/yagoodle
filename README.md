@@ -1,14 +1,78 @@
 # Yagoodle
 
 A daily hololive talent guessing game, in the style of Onepiecedle / Loldle.
-Every day at midnight (JST by default) each mode gets a new mystery talent.
+Every day at midnight (JST) each mode gets a new mystery talent.
 
 - **Classic**: guess any talent; each trait turns green (match), orange (partial) or red (no match), with ▲▼ arrows for height and debut date. Hints unlock after 4 / 7 / 10 guesses.
 - **Portrait**: a blurred, zoomed-in picture that gets clearer with every wrong guess.
 
-## Run it
+## About this project
 
-Requires Node 22.13+ (uses the built-in `node:sqlite`, so there's nothing native to compile).
+This is a personal learning project. **Most of the code was written by AI** ([Claude Code](https://claude.com/claude-code)): the game, the website, the server and the scheduler.
+
+My goal was to learn SQL and how to set up a hosted database, using a project I'd actually enjoy. The part I worked on hands-on is the **PostgreSQL schema in [`db/`](db/)**. I designed and wrote the tables with AI explaining concepts and reviewing my work, then set up the Supabase instance and filled in the data myself.
+
+What I practiced:
+
+- Designing related tables (languages → generations → talents) instead of one flat table, so each fact is stored in one place
+- Primary keys, including a two-column key (`daily_puzzles (date, mode)`)
+- Foreign keys, `CHECK` constraints, `UNIQUE` rules and defaults
+- PostgreSQL types: `date`, `timestamptz`, `smallint`, `text[]` arrays
+- A view that joins three tables (`talent_profiles`)
+- An index for the scheduler's most common lookup
+- Row level security on a hosted Supabase project
+
+### Status
+
+The database is set up in Supabase. **The website does not use it yet.** It still runs on a local SQLite database filled from `data/talents.json`. Connecting the site to Supabase is the next step.
+
+## Database setup (Supabase)
+
+### 1. Create the project
+
+1. Sign up at [supabase.com](https://supabase.com) and create a new project (the free tier is enough).
+2. Save the database password. The game server will use it to connect.
+
+### 2. Create the tables
+
+Open **SQL Editor** in the Supabase dashboard and run [`db/schema.sql`](db/schema.sql). It creates, in order:
+
+| Object | What it holds |
+| --- | --- |
+| `languages` | Branches by language: JP, EN, ID |
+| `generations` | Debut groups (Gen 3, Myth, holoX…), each linked to a language |
+| `talents` | One row per member, linked to a generation |
+| `daily_puzzles` | The answer for each date and game mode, filled in by the app's scheduler |
+| `talent_profiles` | A view joining the three tables above into flat rows for the app |
+
+The file ends by enabling row level security on every table. Supabase automatically exposes tables through a public API; enabling RLS with no policies blocks that, while the game server (which connects with the database password) is unaffected.
+
+### 3. Add the data
+
+Add rows in dependency order: **languages → generations → talents**. A generation needs its language to exist first, and a talent needs its generation.
+
+- **Table Editor**: open a table and use **Insert row**. Foreign key columns such as `generation_id` show a dropdown of existing rows.
+- **SQL**: [`db/seed.sql`](db/seed.sql) has the languages and example inserts that look up foreign keys by name with a subquery. Every insert uses `on conflict do nothing`, so the file is safe to re-run.
+
+`daily_puzzles` is left empty; the scheduler fills it in.
+
+Naming notes:
+
+- Talent `id`s are lowercase slugs like `usada-pekora`. They also name the talent's image files.
+- Keep Indonesian generations named `ID Gen 1`, `ID Gen 2`… The game compares generation names as text, so a plain `Gen 1` would wrongly match JP's Gen 1.
+- Keep spellings consistent across rows (`Blonde` everywhere, never `Blond` in one place), since hair colors are matched by text.
+
+### 4. Check it
+
+```sql
+select name, branch, generation, status, debut_date
+from talent_profiles
+order by branch, debut_date;
+```
+
+## Run the game locally
+
+Requires Node 22.13+.
 
 ```sh
 npm install
@@ -17,98 +81,38 @@ npm run dev        # same, restarts on file changes
 npm test
 ```
 
-On first start the database (`data/yagoodle.db`) is created and filled from `data/talents.json`.
-
-## The talent database
-
-`data/talents.json` is the file you edit. `npm run seed` syncs it into SQLite (you need to run it after every edit; the server only auto-imports into an empty DB).
-
-```sh
-npm run validate   # check the file: errors, missing fields, missing pictures
-npm run seed       # import into the database
-```
-
-### Fields
-
-| Field | Required | Example | Used for |
-|---|---|---|---|
-| `id` | yes | `"usada-pekora"` | Unique key, lowercase-kebab. Also the picture file name. |
-| `name` | yes | `"Usada Pekora"` | Display and search |
-| `nameJp` | | `"兎田ぺこら"` | Display and search |
-| `aliases` | | `["Pekora", "Peko"]` | Search only |
-| `branch` | yes | `JP`, `EN`, `ID`, `DEV_IS` | Classic column |
-| `generation` | yes | `"Gen 3"`, `"Myth"`, `"holoX"`, `"ID Gen 2"` | Classic column. Keep names unique across branches. |
-| `status` | yes | `Active`, `Graduated`, `Affiliate` | Classic column |
-| `hairColor` | | `["White", "Blue"]` | Classic column, partial matches count |
-| `height` | | `153` (cm) | Classic column with arrows |
-| `debutDate` | | `"2019-07-17"` | Classic column with arrows (same month = green, same year = orange) |
-| `graduationDate` | | `"2024-08-28"` | Stored for reference |
-| `birthday` | | `"01-12"` (MM-DD) | Hint |
-| `fanName` | | `"Nousagi"` | Hint, win screen |
-| `oshiMark` | | `"👯"` | Hint, win screen |
-| `youtube`, `twitter` | | URLs | YouTube link on the win screen |
-| `image` | | `"pekora-v2.png"` | Only if the icon isn't named `<id>.<ext>` |
-| `inPool` | | `true` (default) | Set `false` to keep a talent guessable but never the answer |
-| `verified` | | `false` | Your own checklist flag. `npm run validate` counts unverified entries. |
-
-Any other field you add is kept (in the `extra` column), so you can add data now and use it later.
-Keep spellings consistent (`"Blonde"` everywhere, never `"Blond"` in one place), because matching compares the text exactly (ignoring case).
-
-**The starter data was written from memory and every entry is `verified: false`.** Check it against official profiles, especially heights, graduation status and dates.
-
-### Pictures
-
-| What | Where | Notes |
-|---|---|---|
-| Icon | `public/images/talents/<id>.webp` (or .png / .jpg / .avif) | Square, 256px or larger. Shown in search results and guess rows. Talents without one get an initials placeholder. |
-| Portrait art (optional) | `data/portraits/<id>.png` | Used by Portrait mode. Not publicly served, so players can't match it against the icons. Without it, Portrait mode falls back to the icon. |
-
-Portrait mode stays off until at least one talent has a picture, then it turns on automatically.
-
-### Adding a Classic column
-
-Add an entry to `ATTRIBUTES` in [server/config.js](server/config.js), e.g. `{ key: 'eyeColor', label: 'Eyes', type: 'multi' }`, and add `eyeColor` to talents in the JSON.
-Types: `exact`, `multi`, `number` (arrows), `date` (arrows).
+Talent pictures go in `public/images/talents/<id>.webp` (or .png / .jpg). Portrait mode turns on once at least one talent has a picture.
 
 ## Daily schedule
 
-- The answer for each date and mode is stored in the `daily_puzzles` table, so everyone gets the same talent and restarts don't change it.
+- Each date's answer is stored, so every player gets the same talent and restarting the server doesn't change it.
 - The scheduler checks every minute for the day rolling over and keeps the next 7 days generated.
-- The randomizer works like a shuffle bag: everyone in the pool is picked once before anyone repeats, no one repeats within 30 days, and the two modes never share an answer on the same day.
+- Everyone in the pool is picked once before anyone repeats, no one repeats within 30 days, and the two modes never share an answer on the same day.
 - Answers stay on the server. The browser only receives comparison results.
 
 Admin commands:
 
 ```sh
-npm run schedule                                     # recent + upcoming answers
-npm run schedule -- fill 30                          # generate 30 days ahead
-npm run schedule -- set 2026-12-27 classic amane-kanata   # pin a talent (e.g. a birthday or anniversary)
-npm run schedule -- reroll 2026-10-20 [mode]         # re-randomize a future day
-npm run schedule -- pool [mode]                      # who can currently be an answer
+npm run schedule                                          # recent + upcoming answers
+npm run schedule -- fill 30                               # generate 30 days ahead
+npm run schedule -- set 2026-12-27 classic amane-kanata   # pin a talent to a date
+npm run schedule -- reroll 2026-10-20 [mode]              # re-randomize a future day
+npm run schedule -- pool [mode]                           # who can currently be an answer
 ```
 
-Changing today or earlier requires `--force`, since players may already have guessed.
-
-## Settings (environment variables)
-
-| Variable | Default | |
-|---|---|---|
-| `PORT` | `3000` | |
-| `RESET_TZ` | `Asia/Tokyo` | Any IANA time zone |
-| `SCHEDULE_AHEAD_DAYS` | `7` | |
-| `COOLDOWN_DAYS` | `30` | Minimum gap before a talent repeats (capped by pool size) |
-| `DB_PATH` | `data/yagoodle.db` | |
+Changing today or an earlier date requires `--force`, since players may already have guessed.
 
 ## Project layout
 
-```
-server/      Express API, SQLite access, scheduler, randomizer, comparison logic
-scripts/     seed / validate / schedule CLIs
-public/      the website (plain HTML, CSS and ES modules, no build step)
-data/        talents.json, the SQLite database, private portrait art
-test/        node:test unit tests
+```text
+db/          PostgreSQL schema and seed data for Supabase
+server/      Express API, database access, scheduler, randomizer, comparison logic
+scripts/     seed / validate / schedule commands
+public/      the website (plain HTML, CSS and JavaScript, no build step)
+data/        starter talent data and the local SQLite database
+test/        unit tests
 ```
 
 ---
 
-Fan-made, not affiliated with COVER Corporation. Before publishing, read COVER's derivative-work guidelines, especially regarding official art.
+Fan-made, not affiliated with COVER Corporation. hololive and all talents are property of COVER Corp.
