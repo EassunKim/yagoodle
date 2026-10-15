@@ -15,6 +15,15 @@ const STATUS_TEXT = { correct: 'match', partial: 'partial match', wrong: 'no mat
 // Keep in sync with --flip-ms / --stagger-ms in styles.css.
 const FLIP_MS = 600;
 const STAGGER_MS = 300;
+/** Portrait blur/zoom after 0, 1, 2… wrong guesses; fully clear after 5. */
+const PORTRAIT_STEPS = [
+  { blur: 18, zoom: 2.4 },
+  { blur: 12, zoom: 1.9 },
+  { blur: 7, zoom: 1.55 },
+  { blur: 3.5, zoom: 1.3 },
+  { blur: 1.5, zoom: 1.1 },
+  { blur: 0, zoom: 1 },
+];
 /** Time until the last card of a fresh Classic row has flipped. */
 const revealMs = () => 250 + state.meta.attributes.length * STAGGER_MS + FLIP_MS;
 
@@ -462,12 +471,7 @@ function renderGrid(game) {
             style: `--i:${i}`,
             title: `${attr?.label ?? c.key}: ${c.display}, ${STATUS_TEXT[c.status]}${dirText}`,
           },
-          h(
-            'div',
-            { class: 'tile-card' },
-            h('div', { class: 'face face-back', 'aria-hidden': 'true' }),
-            h('div', { class: `face face-front s-${c.status}${c.dir ? ` dir-${c.dir}` : ''}` }, h('span', {}, c.display)),
-          ),
+          h('div', { class: `face s-${c.status}${c.dir ? ` dir-${c.dir}` : ''}` }, h('span', {}, c.display)),
         );
       }),
     );
@@ -496,8 +500,8 @@ function renderLegend() {
 
 function renderPortrait(game) {
   const wrong = game.guesses.filter((g) => !g.correct).length;
-  const blur = game.solved ? 0 : Math.max(0, 22 - wrong * 3.5);
-  const zoom = game.solved ? 1 : Math.max(1, 3 - wrong * 0.3);
+  const step = game.solved ? PORTRAIT_STEPS.length - 1 : Math.min(wrong, PORTRAIT_STEPS.length - 1);
+  const { blur, zoom } = PORTRAIT_STEPS[step];
   const seed = hashString(state.meta.today);
   const ox = 30 + (seed % 41);
   const oy = 15 + ((seed >>> 8) % 30);

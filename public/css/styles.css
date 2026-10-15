@@ -540,7 +540,6 @@ button {
   border-style: solid;
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  animation: wiggle 2.4s ease-in-out infinite;
 }
 .hint.ready b {
   color: var(--accent);
@@ -549,11 +548,6 @@ button {
   border-style: solid;
   border-color: var(--brand);
   background: var(--brand-soft);
-}
-@keyframes wiggle {
-  0%, 88%, 100% { transform: rotate(0); }
-  92% { transform: rotate(-2deg); }
-  96% { transform: rotate(2deg); }
 }
 
 /* ─── Classic grid ────────────────────────────────────────────────────────── */
@@ -583,18 +577,13 @@ button {
   color: var(--ink-2);
 }
 
-/* Each result tile is a two-sided card: a "?" back that flips over to reveal the result. */
+/* Each result tile is an empty slot that its colored face flips into. */
 .tile {
   position: relative;
   width: var(--tile);
   height: var(--tile);
-  perspective: 600px;
-}
-.tile-card {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-  transform: rotateY(180deg);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
 }
 .face {
   position: absolute;
@@ -610,28 +599,12 @@ button {
   overflow-wrap: anywhere;
   color: #fff;
   border-radius: 12px;
+  background: var(--unknown);
   box-shadow: inset 0 -4px 0 rgb(0 0 0 / 0.14);
   text-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
 }
 .face > span {
   position: relative;
-}
-.face-front {
-  transform: rotateY(180deg);
-  background: var(--unknown);
-}
-.face-back {
-  background:
-    radial-gradient(circle at 30% 25%, rgb(255 255 255 / 0.35), transparent 55%),
-    linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, var(--accent)));
-}
-.face-back::after {
-  content: '?';
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: rgb(255 255 255 / 0.9);
 }
 .s-correct {
   background: var(--correct);
@@ -690,17 +663,21 @@ button {
   background: linear-gradient(transparent, rgb(0 0 0 / 0.7));
 }
 
-/* New guess: the row drops in face-down, then each card flips over in turn. */
+/* New guess: the row's empty slots drop in, then each face flips in, one by one. */
 .grid-row.fresh .tile {
   animation: tile-drop 0.35s cubic-bezier(0.3, 1.4, 0.5, 1) both;
 }
-.grid-row.fresh .tile-card {
+.grid-row.fresh .face {
   animation: tile-flip var(--flip-ms) cubic-bezier(0.45, 1.5, 0.55, 1) both;
   animation-delay: calc(var(--i, 0) * var(--stagger-ms) + 250ms);
 }
-.grid-row.fresh .face-front.s-correct {
-  animation: tile-glow 0.8s ease-out both;
-  animation-delay: calc(var(--i, 0) * var(--stagger-ms) + 250ms + var(--flip-ms));
+.grid-row.fresh .face.s-correct {
+  animation-name: tile-flip, tile-glow;
+  animation-duration: var(--flip-ms), 0.8s;
+  animation-timing-function: cubic-bezier(0.45, 1.5, 0.55, 1), ease-out;
+  animation-delay:
+    calc(var(--i, 0) * var(--stagger-ms) + 250ms),
+    calc(var(--i, 0) * var(--stagger-ms) + 250ms + var(--flip-ms));
 }
 @keyframes tile-drop {
   from {
@@ -714,10 +691,10 @@ button {
 }
 @keyframes tile-flip {
   from {
-    transform: rotateY(0deg);
+    transform: perspective(500px) rotateY(-90deg);
   }
   to {
-    transform: rotateY(180deg);
+    transform: perspective(500px) rotateY(0deg);
   }
 }
 @keyframes tile-glow {
@@ -1173,12 +1150,26 @@ button {
   }
 }
 
+/* Reduced motion (e.g. Windows "Animation effects" off): no movement, but result
+   tiles still appear one by one with a fade instead of a flip. */
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not(.face),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  .grid-row.fresh .face,
+  .grid-row.fresh .face.s-correct {
+    animation-name: tile-fade;
+    animation-duration: 0.3s;
+    animation-delay: calc(var(--i, 0) * var(--stagger-ms) + 250ms);
+  }
+}
+@keyframes tile-fade {
+  from {
+    opacity: 0;
   }
 }

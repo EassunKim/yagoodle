@@ -24,7 +24,7 @@ What I practiced:
 
 ### Status
 
-The database is set up in Supabase. **The website does not use it yet.** It still runs on a local SQLite database filled from `data/talents.json`. Connecting the site to Supabase is the next step.
+The game runs on the Supabase database. The server reads talents from the `talent_profiles` view and stores each day's answers in `daily_puzzles`, using the [`pg`](https://node-postgres.com) library with parameterized queries.
 
 ## Database setup (Supabase)
 
@@ -72,7 +72,15 @@ order by branch, debut_date;
 
 ## Run the game locally
 
-Requires Node 22.13+.
+Requires Node 22.13+ and the Supabase database from the steps above.
+
+Create a `.env` file in the project root with your connection string. In Supabase, click **Connect**, choose **Session pooler**, and copy the string (the direct connection needs IPv6, which many home networks don't have):
+
+```text
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@<region>.pooler.supabase.com:5432/postgres
+```
+
+Remove the `[ ]` around the password, and percent-encode any special characters in it (`@` → `%40`, `$` → `%24`, `#` → `%23`…). `.env` is in `.gitignore`; never commit it.
 
 ```sh
 npm install
@@ -81,7 +89,7 @@ npm run dev        # same, restarts on file changes
 npm test
 ```
 
-Talent pictures go in `public/images/talents/<id>.webp` (or .png / .jpg). Portrait mode turns on once at least one talent has a picture.
+Talent pictures come from each talent's `image_url`, or from a local file at `public/images/talents/<id>.webp` (or .png / .jpg). Portrait mode turns on once at least one talent has a picture. Talent edits made in Supabase show up in the game within a minute.
 
 ## Daily schedule
 
@@ -106,10 +114,10 @@ Changing today or an earlier date requires `--force`, since players may already 
 
 ```text
 db/          PostgreSQL schema and seed data for Supabase
-server/      Express API, database access, scheduler, randomizer, comparison logic
-scripts/     seed / validate / schedule commands
+server/      Express API, Supabase access (db.js), scheduler, randomizer, comparison logic
+scripts/     schedule admin command
 public/      the website (plain HTML, CSS and JavaScript, no build step)
-data/        starter talent data and the local SQLite database
+data/        optional private Portrait-mode art (data/portraits)
 test/        unit tests
 ```
 

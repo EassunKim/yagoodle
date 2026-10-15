@@ -16,8 +16,8 @@ export const SCHEDULE_AHEAD_DAYS = int(process.env.SCHEDULE_AHEAD_DAYS, 7);
 /** A talent can't be the answer again (in the same mode) within this many days. */
 export const COOLDOWN_DAYS = int(process.env.COOLDOWN_DAYS, 30);
 
-export const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'data', 'yagoodle.db');
-export const TALENTS_JSON = path.join(ROOT, 'data', 'talents.json');
+/** Supabase connection string, loaded from .env. */
+export const DATABASE_URL = process.env.DATABASE_URL;
 export const PUBLIC_DIR = path.join(ROOT, 'public');
 /** Public talent icons, shown in search results and guess rows. */
 export const IMAGE_DIR = path.join(PUBLIC_DIR, 'images', 'talents');
@@ -50,8 +50,7 @@ export const MODES = {
     requiresImage: false,
     hints: [
       { key: 'fanName', label: 'Fan name', icon: '💬', after: 4 },
-      { key: 'birthday', label: 'Birthday', icon: '🎂', after: 7, format: 'monthDay' },
-      { key: 'oshiMark', label: 'Oshi mark', icon: '✨', after: 10 },
+      { key: 'oshiMark', label: 'Oshi mark', icon: '✨', after: 8 },
     ],
   },
   portrait: {
@@ -60,8 +59,8 @@ export const MODES = {
     showsAttributes: false,
     requiresImage: true,
     hints: [
-      { key: 'branch', label: 'Branch', icon: '🌏', after: 3 },
-      { key: 'generation', label: 'Generation', icon: '🎓', after: 6 },
+      { key: 'branch', label: 'Branch', icon: '🌏', after: 2 },
+      { key: 'generation', label: 'Generation', icon: '🎓', after: 4 },
     ],
   },
 };

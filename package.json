@@ -8,14 +8,13 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
-    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
-    "validate": "node --disable-warning=ExperimentalWarning scripts/validate.js",
-    "schedule": "node --disable-warning=ExperimentalWarning scripts/schedule.js",
-    "test": "node --disable-warning=ExperimentalWarning --test"
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --env-file-if-exists=.env --watch server/index.js",
+    "schedule": "node --env-file-if-exists=.env scripts/schedule.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "pg": "^8.23.1"
   }
 }
