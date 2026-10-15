@@ -839,7 +839,10 @@ button {
   padding: 20px;
   border-radius: var(--radius);
   border: 2px solid var(--correct);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--correct) 14%, var(--surface)), var(--surface) 65%);
+  /* Wash over the picture so the text on top stays readable in both themes. */
+  background:
+    linear-gradient(color-mix(in srgb, var(--surface) 72%, transparent), color-mix(in srgb, var(--surface) 72%, transparent)),
+    url('/images/moripog.webp') center / cover no-repeat;
 }
 .win.fresh {
   animation: pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both;
@@ -891,6 +894,44 @@ button {
   flex-wrap: wrap;
   gap: 8px;
   margin: 12px 0 6px;
+}
+
+/* ─── Defeat card ─────────────────────────────────────────────────────────── */
+
+.defeat {
+  max-width: 640px;
+  margin: 0 auto 20px;
+  border-radius: var(--radius);
+  border: 2px solid var(--wrong);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--wrong) 12%, var(--surface)), var(--surface) 65%);
+  overflow: hidden;
+}
+.defeat.fresh {
+  animation: pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  animation-delay: var(--delay, 0s);
+}
+.defeat-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+/* The inner card reuses the win layout without its own frame. */
+.defeat .win {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.defeat .eyebrow {
+  color: var(--wrong);
+}
+.defeat.fresh .facts > * {
+  animation: fade-up 0.4s ease both;
+  animation-delay: calc(var(--delay, 0s) + 0.3s + var(--n, 0) * 70ms);
+}
+.mode-check.failed {
+  background: var(--wrong);
 }
 
 @keyframes pop {

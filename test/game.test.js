@@ -37,6 +37,18 @@ test('date: same month correct, same year partial', () => {
   assert.equal(diffYear.dir, 'down');
 });
 
+test('monthDay: same day correct, same month partial', () => {
+  const bday = { key: 'birthday', type: 'monthDay' };
+  assert.equal(compareAttr(bday, '01-12', '01-12').status, 'correct');
+  const sameMonth = compareAttr(bday, '01-12', '01-30');
+  assert.equal(sameMonth.status, 'partial');
+  assert.equal(sameMonth.dir, 'up');
+  assert.equal(sameMonth.display, 'Jan 12');
+  const diffMonth = compareAttr(bday, '11-24', '03-05');
+  assert.equal(diffMonth.status, 'wrong');
+  assert.equal(diffMonth.dir, 'down');
+});
+
 test('missing values are unknown', () => {
   assert.equal(compareAttr(num, null, 150).status, 'unknown');
   assert.equal(compareAttr(num, null, 150).display, '?');

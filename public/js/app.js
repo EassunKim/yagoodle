@@ -134,6 +134,7 @@ function renderTabs() {
     ...state.meta.modes.map((m) => {
       const active = m.id === state.mode;
       const solved = state.games[m.id]?.solved;
+      const failed = state.games[m.id]?.failed;
       return h(
         'button',
         {
@@ -146,6 +147,7 @@ function renderTabs() {
         h('span', { class: 'mode-icon', html: ICONS[m.id] ?? ICONS.classic }),
         h('span', { class: 'mode-text' }, h('b', {}, m.label), h('small', {}, m.tagline)),
         solved ? h('span', { class: 'mode-check', title: 'Solved' }, '✓') : null,
+        failed ? h('span', { class: 'mode-check failed', title: 'Out of guesses' }, '✗') : null,
       );
     }),
   );
@@ -174,7 +176,7 @@ function renderMode() {
   const parts = [
     mode.id === 'portrait' ? renderPortrait(game) : renderPrompt(game),
     renderHints(mode, game),
-    game.solved ? renderWin(mode, game) : renderSearch(game),
+    game.solved ? renderWin(mode, game) : game.failed ? renderDefeat(mode, game) : renderSearch(game),
     mode.id === 'classic' ? renderGrid(game) : renderGuessList(game),
     mode.id === 'classic' && game.guesses.length ? renderLegend() : null,
   ];
@@ -198,13 +200,14 @@ function renderUnavailable(mode) {
 }
 
 function renderPrompt(game) {
-  if (game.solved) return null;
+  if (game.solved || game.failed) return null;
+  const left = state.meta.maxGuesses - game.guesses.length;
   return h(
     'p',
     { class: 'prompt' },
     game.guesses.length
-      ? `${game.guesses.length} ${game.guesses.length === 1 ? 'guess' : 'guesses'} so far. Keep going!`
-      : "Type any talent's name to begin. Each guess shows how close you are.",
+      ? `${left} ${left === 1 ? 'guess' : 'guesses'} left. Keep going!`
+      : `Type any talent's name to begin. You have ${left} guesses, and each one shows how close you are.`,
   );
 }
 
@@ -360,13 +363,19 @@ async function makeGuess(talent) {
   const game = state.games[mode.id];
   const date = state.meta.today;
   try {
-    const res = await api.guess({ date, mode: mode.id, talentId: talent.id });
+    const guessNumber = game.guesses.length + 1;
+    const res = await api.guess({ date, mode: mode.id, talentId: talent.id, guessNumber });
     if (game.guesses.length === 0) store.recordPlayed(mode.id, date);
     game.guesses.push({ guess: res.guess, cells: res.cells ?? null, correct: res.correct });
     if (res.correct) {
       game.solved = true;
       game.profile = res.profile ?? null;
       store.recordWin(mode.id, date, game.guesses.length);
+    } else if (res.answer) {
+      game.failed = true;
+      game.answer = res.answer;
+      game.profile = res.profile ?? null;
+      store.recordLoss(mode.id);
     }
     store.saveGame(date, mode.id, game);
 
@@ -375,11 +384,11 @@ async function makeGuess(talent) {
     renderTabs();
     state.freshId = null;
 
-    if (res.correct) {
+    if (res.correct || game.failed) {
       const delay = mode.id === 'classic' ? revealMs() + 200 : 500;
       setTimeout(() => {
-        $('#win')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        celebrate();
+        $(res.correct ? '#win' : '#defeat')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (res.correct) celebrate();
       }, delay);
     }
   } catch (err) {
@@ -400,7 +409,7 @@ function renderHints(mode, game) {
     ...mode.hints.map((hint) => {
       const revealed = Object.hasOwn(game.hints ?? {}, hint.key);
       const left = hint.after - n;
-      const ready = game.solved || left <= 0;
+      const ready = game.solved || game.failed || left <= 0;
       const status = revealed ? 'open' : ready ? 'ready' : 'locked';
       let value;
       if (revealed) value = game.hints[hint.key] ?? 'Not recorded';
@@ -425,7 +434,7 @@ async function revealHint(hint) {
   const mode = currentMode();
   const game = state.games[mode.id];
   try {
-    const count = game.solved ? 999 : game.guesses.length;
+    const count = game.solved || game.failed ? 999 : game.guesses.length;
     const { hints } = await api.hints(state.meta.today, mode.id, count);
     const found = hints.find((x) => x.key === hint.key);
     if (!found) return;
@@ -500,7 +509,8 @@ function renderLegend() {
 
 function renderPortrait(game) {
   const wrong = game.guesses.filter((g) => !g.correct).length;
-  const step = game.solved ? PORTRAIT_STEPS.length - 1 : Math.min(wrong, PORTRAIT_STEPS.length - 1);
+  const over = game.solved || game.failed;
+  const step = over ? PORTRAIT_STEPS.length - 1 : Math.min(wrong, PORTRAIT_STEPS.length - 1);
   const { blur, zoom } = PORTRAIT_STEPS[step];
   const seed = hashString(state.meta.today);
   const ox = 30 + (seed % 41);
@@ -512,17 +522,17 @@ function renderPortrait(game) {
     state.portraitImg = h('img', { src, alt: 'Mystery talent', draggable: 'false', 'data-src': src });
   }
   const img = state.portraitImg;
-  img.alt = game.solved ? game.guesses.at(-1).guess.name : 'Mystery talent';
+  img.alt = game.solved ? game.guesses.at(-1).guess.name : game.failed ? game.answer.name : 'Mystery talent';
   img.style.cssText = `--blur:${blur}px;--zoom:${zoom};--ox:${ox}%;--oy:${oy}%`;
 
   return h(
     'div',
     { class: 'portrait' },
-    h('div', { class: `portrait-frame${game.solved ? ' solved' : ''}` }, img),
+    h('div', { class: `portrait-frame${over ? ' solved' : ''}` }, img),
     h(
       'p',
       { class: 'muted small center' },
-      game.solved ? 'Full picture revealed!' : 'The picture gets clearer with every wrong guess.',
+      over ? 'Full picture revealed!' : 'The picture gets clearer with every wrong guess.',
     ),
   );
 }
@@ -552,14 +562,11 @@ function renderWin(mode, game) {
   const n = game.guesses.length;
   const fresh = t.id === state.freshId;
   const delay = fresh && mode.id === 'classic' ? revealMs() / 1000 : 0;
-  const next = state.meta.modes.find((m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved);
+  const next = state.meta.modes.find(
+    (m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved && !state.games[m.id]?.failed,
+  );
 
-  const facts = [
-    ['Branch', [p.branch, p.generation].filter(Boolean).join(' · ')],
-    ['Fan name', p.fanName],
-    ['Debut', p.debutDate],
-    ['Oshi mark', p.oshiMark],
-  ].filter(([, v]) => v);
+  const facts = profileFacts(p);
 
   return h(
     'section',
@@ -591,9 +598,70 @@ function renderWin(mode, game) {
   );
 }
 
+function profileFacts(p) {
+  return [
+    ['Branch', [p.branch, p.generation].filter(Boolean).join(' · ')],
+    ['Fan name', p.fanName],
+    ['Debut', p.debutDate],
+    ['Oshi mark', p.oshiMark],
+  ].filter(([, v]) => v);
+}
+
+// ─── Defeat card ─────────────────────────────────────────────────────────────
+
+function renderDefeat(mode, game) {
+  const t = game.answer;
+  const p = game.profile ?? {};
+  const fresh = game.guesses.at(-1).guess.id === state.freshId;
+  const delay = fresh && mode.id === 'classic' ? revealMs() / 1000 : 0;
+  const next = state.meta.modes.find(
+    (m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved && !state.games[m.id]?.failed,
+  );
+  const facts = profileFacts(p);
+
+  return h(
+    'section',
+    { id: 'defeat', class: `defeat${fresh ? ' fresh' : ''}`, style: `--delay:${delay}s` },
+    h('img', { class: 'defeat-art', src: '/images/defeat.webp', alt: 'Out of guesses' }),
+    h(
+      'div',
+      { class: 'win' },
+      h('img', { class: 'win-face', src: avatarSrc(t), alt: '' }),
+      h(
+        'div',
+        { class: 'win-body' },
+        h('p', { class: 'eyebrow' }, 'Out of guesses'),
+        h('p', { class: 'muted' }, "Today's talent was"),
+        h('h2', {}, t.name),
+        t.nameJp ? h('p', { class: 'jp' }, t.nameJp) : null,
+        facts.length
+          ? h(
+              'dl',
+              { class: 'facts' },
+              ...facts.flatMap(([k, v], i) => [h('dt', { style: `--n:${i}` }, k), h('dd', { style: `--n:${i}` }, v)]),
+            )
+          : null,
+        h(
+          'div',
+          { class: 'win-actions' },
+          h('button', { type: 'button', class: 'btn btn-primary', onclick: () => share(mode, game) }, 'Share result'),
+          next ? h('button', { type: 'button', class: 'btn', onclick: () => switchMode(next.id) }, `Play ${next.label} →`) : null,
+          p.youtube ? h('a', { class: 'btn btn-ghost', href: p.youtube, target: '_blank', rel: 'noopener' }, 'YouTube ↗') : null,
+        ),
+        h('p', { class: 'muted small' }, 'Next talent in ', h('b', { 'data-countdown': '' }, fmtCountdown(state.resetAt - Date.now()))),
+      ),
+    ),
+  );
+}
+
 async function share(mode, game) {
   const n = game.guesses.length;
-  const lines = [`Yagoodle #${state.meta.puzzleNumber} · ${mode.label}`, `Found today's talent in ${n} ${n === 1 ? 'guess' : 'guesses'}!`];
+  const lines = [
+    `Yagoodle #${state.meta.puzzleNumber} · ${mode.label}`,
+    game.failed
+      ? `Couldn't find today's talent in ${state.meta.maxGuesses} guesses (X/${state.meta.maxGuesses})`
+      : `Found today's talent in ${n} ${n === 1 ? 'guess' : 'guesses'}!`,
+  ];
   if (mode.id === 'classic') {
     const rows = game.guesses.map((g) => g.cells.map((c) => SHARE_EMOJI[c.status]).join(''));
     if (rows.length > 7) lines.push(`…and ${rows.length - 6} more`, ...rows.slice(-6));

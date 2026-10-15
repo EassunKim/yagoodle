@@ -28,7 +28,7 @@ const gameKey = (date, mode) => `${PREFIX}:game:${date}:${mode}`;
 
 export function loadGame(date, mode) {
   const g = read(gameKey(date, mode), null);
-  return { guesses: [], solved: false, hints: {}, profile: null, ...g };
+  return { guesses: [], solved: false, failed: false, answer: null, hints: {}, profile: null, ...g };
 }
 
 export function saveGame(date, mode, game) {
@@ -89,6 +89,14 @@ export function recordWin(mode, date, guessCount) {
   s.lastWin = date;
   const b = bucketFor(guessCount);
   s.dist[b] = (s.dist[b] ?? 0) + 1;
+  write(statsKey, all);
+}
+
+/** Running out of guesses ends the streak. */
+export function recordLoss(mode) {
+  const all = loadStats();
+  const s = modeStats(all, mode);
+  s.streak = 0;
   write(statsKey, all);
 }
 

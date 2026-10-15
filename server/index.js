@@ -1,5 +1,5 @@
 import express from 'express';
-import { ATTRIBUTES, MODES, PORT, PUBLIC_DIR, RESET_TZ } from './config.js';
+import { ATTRIBUTES, MAX_GUESSES, MODES, PORT, PUBLIC_DIR, RESET_TZ } from './config.js';
 import { addDays, isDateStr, secondsUntilReset, today } from './dates.js';
 import { getAllTalents, getTalent, query } from './db.js';
 import { compareTalents, formatHint } from './game.js';
@@ -73,6 +73,7 @@ app.get('/api/meta', async (req, res) => {
     puzzleNumber: number,
     secondsUntilReset: secondsUntilReset(),
     resetTimeZone: RESET_TZ,
+    maxGuesses: MAX_GUESSES,
     modes: MODE_IDS.map((id, i) => ({
       id,
       label: MODES[id].label,
@@ -99,6 +100,12 @@ app.post('/api/guess', async (req, res) => {
   const out = { correct, guess: publicTalent(guess) };
   if (MODES[mode].showsAttributes) out.cells = compareTalents(guess, answer);
   if (correct) out.profile = profile(answer);
+  // The client sends which guess this is; on the last one, reveal the answer.
+  const guessNumber = Number.parseInt(body.guessNumber, 10) || 0;
+  if (!correct && guessNumber >= MAX_GUESSES) {
+    out.answer = publicTalent(answer);
+    out.profile = profile(answer);
+  }
   res.json(out);
 });
 

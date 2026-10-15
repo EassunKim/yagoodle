@@ -22,6 +22,10 @@ export function formatValue(attr, v) {
       const [y, m] = String(v).split('-').map(Number);
       return `${MONTHS[m - 1]} ${y}`;
     }
+    case 'monthDay': {
+      const [m, d] = String(v).split('-').map(Number);
+      return `${MONTHS[m - 1]} ${d}`;
+    }
     default:
       return String(v);
   }
@@ -69,6 +73,19 @@ export function compareAttr(attr, guessValue, answerValue) {
       } else {
         cell.dir = a > g ? 'up' : 'down';
         cell.status = Math.floor(g / 12) === Math.floor(a / 12) ? 'partial' : 'wrong';
+      }
+      break;
+    }
+
+    case 'monthDay': {
+      // 'MM-DD' strings sort chronologically within a year.
+      const g = String(guessValue);
+      const a = String(answerValue);
+      if (g === a) {
+        cell.status = 'correct';
+      } else {
+        cell.dir = a > g ? 'up' : 'down';
+        cell.status = g.slice(0, 2) === a.slice(0, 2) ? 'partial' : 'wrong';
       }
       break;
     }

@@ -52,6 +52,7 @@ export function rowToTalent(row) {
     generation: row.generation,
     status: row.status,
     debutDate: row.debut_date,
+    birthday: row.birthday,
     height: row.height_cm,
     hairColor: row.hair_colors ?? [],
     fanName: row.fan_name,

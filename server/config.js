@@ -31,15 +31,19 @@ export const PORTRAIT_DIR = path.join(ROOT, 'data', 'portraits');
  *  multi  – list; identical → green, any overlap → orange, none → red
  *  number – equal → green, otherwise red with an arrow toward the answer
  *  date   – same month → green, same year → orange, otherwise red; arrow toward the answer
+ *  monthDay – 'MM-DD'; same day → green, same month → orange, otherwise red; arrow toward the answer
  */
 export const ATTRIBUTES = [
   { key: 'branch', label: 'Branch', type: 'exact' },
   { key: 'generation', label: 'Generation', type: 'exact' },
   { key: 'status', label: 'Status', type: 'exact' },
-  { key: 'hairColor', label: 'Hair', type: 'multi' },
   { key: 'height', label: 'Height', type: 'number', unit: 'cm' },
   { key: 'debutDate', label: 'Debut', type: 'date' },
+  { key: 'birthday', label: 'Birthday', type: 'monthDay' },
 ];
+
+/** Wrong guesses allowed per puzzle; the answer is revealed when they run out. */
+export const MAX_GUESSES = 10;
 
 /** Game modes. Each gets its own daily answer. Hints unlock after `after` guesses. */
 export const MODES = {
@@ -49,8 +53,8 @@ export const MODES = {
     showsAttributes: true,
     requiresImage: false,
     hints: [
-      { key: 'fanName', label: 'Fan name', icon: '💬', after: 4 },
-      { key: 'oshiMark', label: 'Oshi mark', icon: '✨', after: 8 },
+      { key: 'oshiMark', label: 'Oshi mark', icon: '✨', after: 4 },
+      { key: 'fanName', label: 'Fan name', icon: '💬', after: 8 },
     ],
   },
   portrait: {
