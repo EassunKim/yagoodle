@@ -15,15 +15,25 @@ const STATUS_TEXT = { correct: 'match', partial: 'partial match', wrong: 'no mat
 // Keep in sync with --flip-ms / --stagger-ms in styles.css.
 const FLIP_MS = 600;
 const STAGGER_MS = 300;
-/** Portrait blur/zoom after 0, 1, 2… wrong guesses; fully clear after 5. */
+/**
+ * Portrait view after 0, 1, 2… wrong guesses: starts grey, zoomed in, slightly
+ * blurred and turned the wrong way; zooms out and sharpens slowly, then color
+ * returns, and the picture is turned upright last.
+ */
 const PORTRAIT_STEPS = [
-  { blur: 18, zoom: 2.4 },
-  { blur: 12, zoom: 1.9 },
-  { blur: 7, zoom: 1.55 },
-  { blur: 3.5, zoom: 1.3 },
-  { blur: 1.5, zoom: 1.1 },
-  { blur: 0, zoom: 1 },
+  { zoom: 2.6, blur: 4, gray: 1, upright: false },
+  { zoom: 2.3, blur: 3.5, gray: 1, upright: false },
+  { zoom: 2.05, blur: 3, gray: 1, upright: false },
+  { zoom: 1.8, blur: 2.5, gray: 1, upright: false },
+  { zoom: 1.6, blur: 2, gray: 1, upright: false },
+  { zoom: 1.4, blur: 1.5, gray: 1, upright: false },
+  { zoom: 1.25, blur: 1, gray: 1, upright: false },
+  { zoom: 1.1, blur: 0.5, gray: 0, upright: false },
+  { zoom: 1, blur: 0, gray: 0, upright: false },
+  { zoom: 1, blur: 0, gray: 0, upright: true },
 ];
+/** Wrong orientations the day's portrait can start in, in degrees. */
+const PORTRAIT_TURNS = [90, 180, -90];
 /** Time until the last card of a fresh Classic row has flipped. */
 const revealMs = () => 250 + state.meta.attributes.length * STAGGER_MS + FLIP_MS;
 
@@ -37,6 +47,7 @@ const state = {
   freshHint: null, // hint key to animate on the next render
   resetAt: 0,
   portraitImg: null,
+  portraitTurn: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -511,28 +522,33 @@ function renderPortrait(game) {
   const wrong = game.guesses.filter((g) => !g.correct).length;
   const over = game.solved || game.failed;
   const step = over ? PORTRAIT_STEPS.length - 1 : Math.min(wrong, PORTRAIT_STEPS.length - 1);
-  const { blur, zoom } = PORTRAIT_STEPS[step];
+  const { blur, zoom, gray, upright } = PORTRAIT_STEPS[step];
   const seed = hashString(state.meta.today);
   const ox = 30 + (seed % 41);
   const oy = 15 + ((seed >>> 8) % 30);
+  const turn = upright ? 0 : PORTRAIT_TURNS[(seed >>> 16) % PORTRAIT_TURNS.length];
 
-  // Reuse the same <img> across renders so blur/zoom changes animate smoothly.
+  // Reuse the same elements across renders so each change animates smoothly.
+  // The picture turns inside its own wrapper so it spins around the frame's
+  // centre, while the zoom stays anchored on the day's focus point.
   const src = api.portraitUrl(state.meta.today, 'portrait');
   if (!state.portraitImg || state.portraitImg.dataset.src !== src) {
     state.portraitImg = h('img', { src, alt: 'Mystery talent', draggable: 'false', 'data-src': src });
+    state.portraitTurn = h('div', { class: 'portrait-turn' }, state.portraitImg);
   }
   const img = state.portraitImg;
   img.alt = game.solved ? game.guesses.at(-1).guess.name : game.failed ? game.answer.name : 'Mystery talent';
-  img.style.cssText = `--blur:${blur}px;--zoom:${zoom};--ox:${ox}%;--oy:${oy}%`;
+  img.style.cssText = `--blur:${blur}px;--zoom:${zoom};--gray:${gray};--ox:${ox}%;--oy:${oy}%`;
+  state.portraitTurn.style.cssText = `--turn:${turn}deg`;
 
   return h(
     'div',
     { class: 'portrait' },
-    h('div', { class: `portrait-frame${over ? ' solved' : ''}` }, img),
+    h('div', { class: `portrait-frame${over ? ' solved' : ''}` }, state.portraitTurn),
     h(
       'p',
       { class: 'muted small center' },
-      over ? 'Full picture revealed!' : 'The picture gets clearer with every wrong guess.',
+      over ? 'Full picture revealed!' : 'Every wrong guess zooms out a little further.',
     ),
   );
 }
