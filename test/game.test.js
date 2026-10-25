@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compareAttr, formatHint } from '../server/game.js';
+import { byBirthday, pickLineup } from '../server/lineup.js';
 import { pickTalent } from '../server/randomizer.js';
 
 const exact = { key: 'branch', type: 'exact' };
@@ -80,4 +81,32 @@ test('randomizer respects cooldown and exclusions', () => {
 test('randomizer relaxes constraints for tiny pools', () => {
   assert.equal(pickTalent({ pool: ['solo'], history: ['solo'], cooldown: 30, exclude: ['solo'] }), 'solo');
   assert.equal(pickTalent({ pool: [] }), null);
+});
+
+const bdayTalents = Array.from({ length: 30 }, (_, i) => ({
+  id: `t${i}`,
+  inPool: true,
+  // Pairs share a birthday, so the picker has to skip ties.
+  birthday: `${String((Math.floor(i / 2) % 12) + 1).padStart(2, '0')}-${String((i % 7) + 1).padStart(2, '0')}`,
+}));
+
+test('birthday line-up is the same all day and differs between days', () => {
+  const a = pickLineup(bdayTalents, '2026-10-24', 5).map((t) => t.id);
+  assert.deepEqual(pickLineup(bdayTalents, '2026-10-24', 5).map((t) => t.id), a);
+  assert.notDeepEqual(pickLineup(bdayTalents, '2026-10-25', 5).map((t) => t.id), a);
+});
+
+test('birthday line-up has distinct birthdays and never starts solved', () => {
+  for (let d = 1; d <= 28; d++) {
+    const lineup = pickLineup(bdayTalents, `2026-02-${String(d).padStart(2, '0')}`, 5);
+    assert.equal(lineup.length, 5);
+    assert.equal(new Set(lineup.map((t) => t.birthday)).size, 5);
+    assert.notDeepEqual(lineup, byBirthday(lineup));
+  }
+});
+
+test('birthday line-up needs enough talents with birthdays', () => {
+  const few = bdayTalents.slice(0, 4);
+  assert.equal(pickLineup(few, '2026-10-24', 5), null);
+  assert.equal(pickLineup(bdayTalents.map((t) => ({ ...t, birthday: null })), '2026-10-24', 5), null);
 });

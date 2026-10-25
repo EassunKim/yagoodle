@@ -45,6 +45,19 @@ export const ATTRIBUTES = [
 /** Wrong guesses allowed per puzzle; the answer is revealed when they run out. */
 export const MAX_GUESSES = 10;
 
+/**
+ * Birthday mode: put a daily line-up of talents in birthday order. Separate
+ * from MODES because it has no single answer, so it isn't stored in
+ * daily_puzzles; the line-up is picked from the date instead.
+ */
+export const BIRTHDAY_MODE = {
+  id: 'birthday',
+  label: 'Birthdays',
+  tagline: 'Put them in order',
+  size: 5,
+  attempts: 3,
+};
+
 /** Game modes. Each gets its own daily answer. Hints unlock after `after` guesses. */
 export const MODES = {
   classic: {

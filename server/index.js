@@ -1,9 +1,10 @@
 import express from 'express';
-import { ATTRIBUTES, MAX_GUESSES, MODES, PORT, PUBLIC_DIR, RESET_TZ } from './config.js';
+import { ATTRIBUTES, BIRTHDAY_MODE, MAX_GUESSES, MODES, PORT, PUBLIC_DIR, RESET_TZ } from './config.js';
 import { addDays, isDateStr, secondsUntilReset, today } from './dates.js';
 import { getAllTalents, getTalent, query } from './db.js';
 import { compareTalents, formatHint } from './game.js';
 import { imageUrl, portraitSource } from './images.js';
+import { byBirthday, pickLineup } from './lineup.js';
 import { MODE_IDS, getPuzzle, getPuzzleRow, puzzleNumber, startScheduler } from './scheduler.js';
 
 class HttpError extends Error {
@@ -55,6 +56,15 @@ async function resolvePuzzle({ mode, date }) {
   return { mode, date, answer: await getTalent(row.talentId) };
 }
 
+/** Validates the date from a request and returns that day's birthday line-up. */
+async function resolveLineup({ date }) {
+  date = date ? String(date) : today();
+  if (!isDateStr(date) || date > today()) throw new HttpError(400, 'Invalid date');
+  const lineup = pickLineup(await getAllTalents(), date, BIRTHDAY_MODE.size);
+  if (!lineup) throw new HttpError(404, 'Not enough talents have birthdays yet');
+  return lineup;
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '8kb' }));
@@ -64,10 +74,12 @@ app.use(express.static(PUBLIC_DIR, { cacheControl: false, setHeaders: (res) => r
 
 app.get('/api/meta', async (req, res) => {
   const date = today();
-  const [number, puzzles] = await Promise.all([
+  const [number, puzzles, talents] = await Promise.all([
     puzzleNumber(date),
     Promise.all(MODE_IDS.map((id) => getPuzzle(date, id))),
+    getAllTalents(),
   ]);
+  const bday = BIRTHDAY_MODE;
   res.json({
     today: date,
     puzzleNumber: number,
@@ -81,7 +93,16 @@ app.get('/api/meta', async (req, res) => {
       requiresImage: MODES[id].requiresImage,
       available: puzzles[i] !== null,
       hints: MODES[id].hints.map(({ key, label, icon, after }) => ({ key, label, icon, after })),
-    })),
+    })).concat({
+      id: bday.id,
+      label: bday.label,
+      tagline: bday.tagline,
+      requiresImage: false,
+      available: pickLineup(talents, date, bday.size) !== null,
+      hints: [],
+      size: bday.size,
+      attempts: bday.attempts,
+    }),
     attributes: ATTRIBUTES.map(({ key, label, type, unit }) => ({ key, label, type, unit })),
   });
 });
@@ -105,6 +126,34 @@ app.post('/api/guess', async (req, res) => {
   if (!correct && guessNumber >= MAX_GUESSES) {
     out.answer = publicTalent(answer);
     out.profile = profile(answer);
+  }
+  res.json(out);
+});
+
+// Birthday line-up, in the scrambled starting order. Birthdays stay hidden.
+app.get('/api/birthday', async (req, res) => {
+  const lineup = await resolveLineup(req.query);
+  res.json({ talents: lineup.map(publicTalent) });
+});
+
+// Checks an ordering. Reveals the birthdays once solved or out of attempts.
+app.post('/api/birthday/check', async (req, res) => {
+  const body = req.body ?? {};
+  const lineup = await resolveLineup(body);
+  const order = Array.isArray(body.order) ? body.order.map(String) : [];
+  const ids = new Set(lineup.map((t) => t.id));
+  if (order.length !== ids.size || new Set(order).size !== ids.size || !order.every((x) => ids.has(x))) {
+    throw new HttpError(400, "That isn't today's line-up");
+  }
+
+  const answer = byBirthday(lineup);
+  const correct = order.map((x, i) => x === answer[i].id);
+  const solved = correct.every(Boolean);
+  const out = { correct, solved };
+  // Like guesses, the client says which attempt this is; on the last one, show the answer.
+  const attempt = Number.parseInt(body.attempt, 10) || 0;
+  if (solved || attempt >= BIRTHDAY_MODE.attempts) {
+    out.answer = answer.map((t) => ({ id: t.id, birthday: formatHint({ format: 'monthDay' }, t.birthday) }));
   }
   res.json(out);
 });

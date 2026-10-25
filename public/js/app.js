@@ -7,6 +7,8 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
   portrait:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="12" cy="10" r="3.2"/><path d="M6.5 20c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/></svg>',
+  birthday:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="12" width="15" height="8.5" rx="1.5"/><path d="M4.5 15.5c1.5 1 2.5 1 3.75 0s2.5-1 3.75 0 2.5 1 3.75 0 2.25-1 3.75 0"/><path d="M12 8.5V12"/><path d="M12 4c1 1 1 2.4 0 3-1-.6-1-2 0-3z"/></svg>',
   search:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>',
 };
@@ -48,6 +50,9 @@ const state = {
   resetAt: 0,
   portraitImg: null,
   portraitTurn: null,
+  lineup: null, // today's birthday-mode talents, in their starting order
+  freshCheck: false, // animate the birthday result on the next render
+  lineupFocus: null, // talent id to refocus after a keyboard move
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -62,13 +67,19 @@ init().catch((err) => {
 
 async function init() {
   setupChrome();
-  const [meta, { talents }] = await Promise.all([api.meta(), api.talents()]);
+  const [meta, { talents }, lineup] = await Promise.all([
+    api.meta(),
+    api.talents(),
+    api.birthday('').catch(() => null), // server picks today's; missing just disables the mode
+  ]);
   state.meta = meta;
   state.talents = talents.map((t) => ({ ...t, _keys: searchKeys(t) }));
   state.resetAt = Date.now() + meta.secondsUntilReset * 1000;
+  state.lineup = lineup?.talents ?? null;
 
   store.pruneGames(meta.today);
   for (const m of meta.modes) state.games[m.id] = store.loadGame(meta.today, m.id);
+  if (state.lineup) state.games.birthday = prepareLineupGame(state.games.birthday);
 
   const fromHash = location.hash.slice(1);
   state.mode = (meta.modes.find((m) => m.id === fromHash) ?? meta.modes.find((m) => m.available) ?? meta.modes[0]).id;
@@ -179,8 +190,14 @@ function renderMode() {
   const game = state.games[mode.id];
   $('#puzzle-no').textContent = `#${state.meta.puzzleNumber} · ${mode.label}`;
 
-  if (!mode.available) {
+  if (!mode.available || (mode.id === 'birthday' && !state.lineup)) {
     $('#mode-body').replaceChildren(renderUnavailable(mode));
+    return;
+  }
+
+  if (mode.id === 'birthday') {
+    const over = game.solved || game.failed;
+    $('#mode-body').replaceChildren(...[over ? renderLineupResult(mode, game) : null, renderLineup(mode, game)].filter(Boolean));
     return;
   }
 
@@ -203,9 +220,11 @@ function renderUnavailable(mode) {
     h(
       'p',
       { class: 'muted' },
-      mode.requiresImage
-        ? 'This mode needs talent pictures. Add images to public/images/talents (or data/portraits) and it will start automatically.'
-        : 'No talents are in the answer pool yet.',
+      mode.id === 'birthday'
+        ? `This mode needs at least ${mode.size} talents with different birthdays (see db/birthdays.sql).`
+        : mode.requiresImage
+          ? 'This mode needs talent pictures. Add images to public/images/talents (or data/portraits) and it will start automatically.'
+          : 'No talents are in the answer pool yet.',
     ),
   );
 }
@@ -578,10 +597,6 @@ function renderWin(mode, game) {
   const n = game.guesses.length;
   const fresh = t.id === state.freshId;
   const delay = fresh && mode.id === 'classic' ? revealMs() / 1000 : 0;
-  const next = state.meta.modes.find(
-    (m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved && !state.games[m.id]?.failed,
-  );
-
   const facts = profileFacts(p);
 
   return h(
@@ -602,16 +617,26 @@ function renderWin(mode, game) {
             ...facts.flatMap(([k, v], i) => [h('dt', { style: `--n:${i}` }, k), h('dd', { style: `--n:${i}` }, v)]),
           )
         : null,
-      h(
-        'div',
-        { class: 'win-actions' },
-        h('button', { type: 'button', class: 'btn btn-primary', onclick: () => share(mode, game) }, 'Share result'),
-        next ? h('button', { type: 'button', class: 'btn', onclick: () => switchMode(next.id) }, `Play ${next.label} →`) : null,
-        p.youtube ? h('a', { class: 'btn btn-ghost', href: p.youtube, target: '_blank', rel: 'noopener' }, 'YouTube ↗') : null,
-      ),
-      h('p', { class: 'muted small' }, 'Next talent in ', h('b', { 'data-countdown': '' }, fmtCountdown(state.resetAt - Date.now()))),
+      ...resultActions(mode, game, { youtube: p.youtube }),
     ),
   );
+}
+
+/** Share / play-next / YouTube buttons and the countdown, shared by every result card. */
+function resultActions(mode, game, { youtube = null, nextLabel = 'Next talent in ' } = {}) {
+  const next = state.meta.modes.find(
+    (m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved && !state.games[m.id]?.failed,
+  );
+  return [
+    h(
+      'div',
+      { class: 'win-actions' },
+      h('button', { type: 'button', class: 'btn btn-primary', onclick: () => share(mode, game) }, 'Share result'),
+      next ? h('button', { type: 'button', class: 'btn', onclick: () => switchMode(next.id) }, `Play ${next.label} →`) : null,
+      youtube ? h('a', { class: 'btn btn-ghost', href: youtube, target: '_blank', rel: 'noopener' }, 'YouTube ↗') : null,
+    ),
+    h('p', { class: 'muted small' }, nextLabel, h('b', { 'data-countdown': '' }, fmtCountdown(state.resetAt - Date.now()))),
+  ];
 }
 
 function profileFacts(p) {
@@ -630,9 +655,6 @@ function renderDefeat(mode, game) {
   const p = game.profile ?? {};
   const fresh = game.guesses.at(-1).guess.id === state.freshId;
   const delay = fresh && mode.id === 'classic' ? revealMs() / 1000 : 0;
-  const next = state.meta.modes.find(
-    (m) => m.id !== mode.id && m.available && !state.games[m.id]?.solved && !state.games[m.id]?.failed,
-  );
   const facts = profileFacts(p);
 
   return h(
@@ -657,32 +679,35 @@ function renderDefeat(mode, game) {
               ...facts.flatMap(([k, v], i) => [h('dt', { style: `--n:${i}` }, k), h('dd', { style: `--n:${i}` }, v)]),
             )
           : null,
-        h(
-          'div',
-          { class: 'win-actions' },
-          h('button', { type: 'button', class: 'btn btn-primary', onclick: () => share(mode, game) }, 'Share result'),
-          next ? h('button', { type: 'button', class: 'btn', onclick: () => switchMode(next.id) }, `Play ${next.label} →`) : null,
-          p.youtube ? h('a', { class: 'btn btn-ghost', href: p.youtube, target: '_blank', rel: 'noopener' }, 'YouTube ↗') : null,
-        ),
-        h('p', { class: 'muted small' }, 'Next talent in ', h('b', { 'data-countdown': '' }, fmtCountdown(state.resetAt - Date.now()))),
+        ...resultActions(mode, game, { youtube: p.youtube }),
       ),
     ),
   );
 }
 
 async function share(mode, game) {
-  const n = game.guesses.length;
-  const lines = [
-    `Yagoodle #${state.meta.puzzleNumber} · ${mode.label}`,
-    game.failed
-      ? `Couldn't find today's talent in ${state.meta.maxGuesses} guesses (X/${state.meta.maxGuesses})`
-      : `Found today's talent in ${n} ${n === 1 ? 'guess' : 'guesses'}!`,
-  ];
+  const lines = [`Yagoodle #${state.meta.puzzleNumber} · ${mode.label}`];
+  if (mode.id === 'birthday') {
+    const n = game.attempts.length;
+    lines.push(
+      game.failed
+        ? `Couldn't sort the birthdays in ${mode.attempts} tries (X/${mode.attempts})`
+        : `Sorted the birthdays in ${n}/${mode.attempts} ${n === 1 ? 'try' : 'tries'}!`,
+      ...game.attempts.map((row) => row.map((ok) => (ok ? '🟩' : '🟥')).join('')),
+    );
+  } else {
+    const n = game.guesses.length;
+    lines.push(
+      game.failed
+        ? `Couldn't find today's talent in ${state.meta.maxGuesses} guesses (X/${state.meta.maxGuesses})`
+        : `Found today's talent in ${n} ${n === 1 ? 'guess' : 'guesses'}!`,
+    );
+  }
   if (mode.id === 'classic') {
     const rows = game.guesses.map((g) => g.cells.map((c) => SHARE_EMOJI[c.status]).join(''));
     if (rows.length > 7) lines.push(`…and ${rows.length - 6} more`, ...rows.slice(-6));
     else lines.push(...rows);
-  } else {
+  } else if (mode.id === 'portrait') {
     lines.push(game.guesses.map((g) => (g.correct ? '🟩' : '🟥')).join(''));
   }
   lines.push(location.origin);
@@ -692,6 +717,251 @@ async function share(mode, game) {
   } catch {
     toast("Couldn't copy. Your browser blocked the clipboard.", 'error');
   }
+}
+
+// ─── Birthday mode ───────────────────────────────────────────────────────────
+
+/** Fills in a birthday game, or starts it over if the saved order isn't today's line-up. */
+function prepareLineupGame(game) {
+  const ids = state.lineup.map((t) => t.id);
+  const valid = Array.isArray(game.order) && game.order.length === ids.length && ids.every((id) => game.order.includes(id));
+  if (valid) return { attempts: [], locked: ids.map(() => false), reveal: null, ...game };
+  return {
+    guesses: [],
+    solved: false,
+    failed: false,
+    answer: null,
+    hints: {},
+    profile: null,
+    order: ids,
+    locked: ids.map(() => false),
+    attempts: [],
+    reveal: null,
+  };
+}
+
+/** Next slot from `i` in direction `step` that isn't locked, or -1. */
+function nearestOpen(game, i, step) {
+  for (let j = i + step; j >= 0 && j < game.order.length; j += step) if (!game.locked[j]) return j;
+  return -1;
+}
+
+function swapLineup(game, a, b) {
+  if (game.locked[a] || game.locked[b] || game.solved || game.failed) return;
+  [game.order[a], game.order[b]] = [game.order[b], game.order[a]];
+  store.saveGame(state.meta.today, 'birthday', game);
+  renderMode();
+  // Keep keyboard focus on the talent that moved so it can keep moving.
+  if (state.lineupFocus) {
+    document.querySelector(`.lineup-slot[data-id="${CSS.escape(state.lineupFocus)}"]`)?.focus();
+    state.lineupFocus = null;
+  }
+}
+
+/**
+ * Pointer drag for mouse and touch alike: a floating copy follows the pointer,
+ * and letting go over another open spot swaps the two talents.
+ */
+function startDrag(e, game, from) {
+  if (e.button !== 0 || state.busy) return;
+  const slot = e.currentTarget;
+  const rect = slot.getBoundingClientRect();
+  const offX = e.clientX - rect.left;
+  const offY = e.clientY - rect.top;
+  const ghost = slot.cloneNode(true);
+  ghost.className = 'lineup-slot lineup-ghost';
+  ghost.removeAttribute('tabindex');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.width = `${rect.width}px`;
+  let started = false;
+  let target = null;
+
+  const move = (ev) => {
+    if (!started) {
+      // Ignore tiny wobbles so a plain tap doesn't count as a drag.
+      if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+      started = true;
+      document.body.append(ghost);
+      slot.classList.add('dragging');
+    }
+    ghost.style.transform = `translate(${ev.clientX - offX}px, ${ev.clientY - offY}px)`;
+    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.lineup-slot[data-open]');
+    const next = over && over !== slot ? over : null;
+    if (next !== target) {
+      target?.classList.remove('drop-target');
+      target = next;
+      target?.classList.add('drop-target');
+    }
+  };
+  const end = () => {
+    slot.removeEventListener('pointermove', move);
+    slot.removeEventListener('pointerup', end);
+    slot.removeEventListener('pointercancel', end);
+    ghost.remove();
+    slot.classList.remove('dragging');
+    target?.classList.remove('drop-target');
+    if (target) swapLineup(game, from, Number(target.dataset.i));
+  };
+
+  slot.setPointerCapture(e.pointerId);
+  slot.addEventListener('pointermove', move);
+  slot.addEventListener('pointerup', end);
+  slot.addEventListener('pointercancel', end);
+}
+
+function renderLives(mode, game) {
+  const left = mode.attempts - game.attempts.length;
+  return h(
+    'span',
+    { class: 'lives', role: 'img', 'aria-label': `${left} of ${mode.attempts} tries left` },
+    ...Array.from({ length: mode.attempts }, (_, k) => h('span', { class: `life${k < left ? '' : ' spent'}` })),
+  );
+}
+
+function renderLineup(mode, game) {
+  const byId = new Map(state.lineup.map((t) => [t.id, t]));
+  const birthdays = new Map((game.reveal ?? []).map((r) => [r.id, r.birthday]));
+  const over = game.solved || game.failed;
+  // After a loss, show the right order; spots the player got right stay green.
+  const order = game.failed ? game.reveal.map((r) => r.id) : game.order;
+  const fresh = state.freshCheck;
+
+  const slots = order.map((id, i) => {
+    const t = byId.get(id);
+    const locked = game.locked[i];
+    const movable = !over && !locked;
+    const missed = !locked && (game.failed || (fresh && game.attempts.length > 0));
+    const bday = birthdays.get(id);
+    return h(
+      'li',
+      {
+        class: `lineup-slot${locked ? ' locked' : ''}${missed ? ' missed' : ''}${fresh ? ' fresh' : ''}`,
+        style: `--i:${i}`,
+        'data-i': i,
+        'data-id': id,
+        'data-open': movable ? '' : null,
+        tabindex: movable ? '0' : null,
+        'aria-label': `${t.name}, spot ${i + 1}${bday ? `, born ${bday}` : ''}${movable ? '. Drag, or use the arrow keys, to move.' : ''}`,
+        onpointerdown: movable ? (e) => startDrag(e, game, i) : null,
+        onkeydown: movable
+          ? (e) => {
+              const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+              const to = step ? nearestOpen(game, i, step) : -1;
+              if (to < 0) return;
+              e.preventDefault();
+              state.lineupFocus = id;
+              swapLineup(game, i, to);
+            }
+          : null,
+      },
+      h(
+        'div',
+        { class: 'lineup-card' },
+        h('img', { src: avatarSrc(t), alt: '', draggable: 'false' }),
+        locked || over ? h('span', { class: 'lineup-mark', 'aria-hidden': 'true' }, locked ? '✓' : '✗') : null,
+      ),
+      h('span', { class: 'lineup-name' }, t.name),
+      bday ? h('span', { class: 'lineup-bday' }, bday) : null,
+    );
+  });
+
+  return h(
+    'section',
+    { class: 'lineup' },
+    over
+      ? null
+      : h(
+          'p',
+          { class: 'prompt' },
+          'Drag these talents into birthday order, January on the left. Anyone in the right spot locks in after each check.',
+        ),
+    h('div', { class: 'lineup-axis muted small', 'aria-hidden': 'true' }, h('span', {}, 'January'), h('span', {}, 'December')),
+    h('ol', { class: 'lineup-list' }, ...slots),
+    h(
+      'div',
+      { class: 'lineup-actions' },
+      over ? null : h('button', { type: 'button', class: 'btn btn-primary', onclick: () => checkLineup(mode, game) }, 'Check order'),
+      renderLives(mode, game),
+    ),
+  );
+}
+
+async function checkLineup(mode, game) {
+  if (state.busy) return;
+  state.busy = true;
+  const date = state.meta.today;
+  try {
+    const attempt = game.attempts.length + 1;
+    const res = await api.birthdayCheck({ date, order: game.order, attempt });
+    if (attempt === 1) store.recordPlayed(mode.id, date);
+    game.attempts.push(res.correct);
+    game.locked = res.correct.map((ok, i) => ok || game.locked[i]);
+    if (res.answer) game.reveal = res.answer;
+    if (res.solved) {
+      game.solved = true;
+      store.recordWin(mode.id, date, attempt);
+    } else if (res.answer) {
+      game.failed = true;
+      store.recordLoss(mode.id);
+    }
+    store.saveGame(date, mode.id, game);
+
+    state.freshCheck = true;
+    renderMode();
+    renderTabs();
+    state.freshCheck = false;
+
+    if (game.solved || game.failed) {
+      setTimeout(() => {
+        $(game.solved ? '#win' : '#defeat')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (game.solved) celebrate();
+      }, 500);
+    } else {
+      const right = res.correct.filter(Boolean).length;
+      toast(`${right} of ${res.correct.length} in the right spot`);
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    state.busy = false;
+  }
+}
+
+function renderLineupResult(mode, game) {
+  const n = game.attempts.length;
+  const fresh = state.freshCheck ? ' fresh' : '';
+  const actions = resultActions(mode, game, { nextLabel: 'New line-up in ' });
+
+  if (game.solved) {
+    return h(
+      'section',
+      { id: 'win', class: `win${fresh}`, style: '--delay:0.3s' },
+      h(
+        'div',
+        { class: 'win-body' },
+        h('p', { class: 'eyebrow' }, 'You got it!'),
+        h('h2', {}, 'Perfect order'),
+        h('p', { class: 'win-count' }, 'Sorted in ', h('b', {}, n), ` ${n === 1 ? 'try' : 'tries'}`),
+        ...actions,
+      ),
+    );
+  }
+  return h(
+    'section',
+    { id: 'defeat', class: `defeat${fresh}`, style: '--delay:0.3s' },
+    h('img', { class: 'defeat-art', src: '/images/defeat.webp', alt: 'Out of tries' }),
+    h(
+      'div',
+      { class: 'win' },
+      h(
+        'div',
+        { class: 'win-body' },
+        h('p', { class: 'eyebrow' }, 'Out of tries'),
+        h('p', { class: 'muted' }, "Here's the right order, with everyone's birthday."),
+        ...actions,
+      ),
+    ),
+  );
 }
 
 // ─── Yesterday + stats ───────────────────────────────────────────────────────
@@ -751,7 +1021,7 @@ function renderStats() {
             );
           }),
         ),
-        h('p', { class: 'muted small' }, 'Guesses needed per win'),
+        h('p', { class: 'muted small' }, m.id === 'birthday' ? 'Tries needed per win' : 'Guesses needed per win'),
       );
     }),
   );
